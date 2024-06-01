@@ -271,6 +271,42 @@ def busca_produto(nomeProduto):
         return response
 
 
+# Rota para obter um produto pelo id
+@app.route('/get_produto', methods=['POST'])
+def get_produto():
+    data = request.get_json()
+
+    comando = db_connection.cursor()
+    db_connection.rollback()
+    comando.execute("SELECT * FROM loja.produto WHERE idProduto = %s", (data['idProduto'],))
+    produto = comando.fetchone()
+    comando.close()
+
+    if produto:
+        print(produto)
+        produto_dict = {
+            'idProduto': produto[0],
+            'nomeProduto': produto[1],
+            'estoqueProduto': produto[2],
+            'descricao': produto[3],
+            'tamanhoProduto': produto[4],
+            'corPrincipal': produto[5],
+            'preco': produto[6],
+            'desconto': produto[7],
+            'imagemProduto': produto[8],
+            'emOferta': produto[9]
+        }
+        response = make_response(jsonify(produto_dict))
+        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
+        return response
+
+    else:
+        print(json.dumps({'message': 'Produto não encontrado.'}))
+        response = make_response(json.dumps({'message': 'Produto nao encontrado.'}))
+        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
+        return '-1'
+
+
 # filtrar produtos pelo nome da categoria
 @app.route('/filtrar_produto_categoria/<nomeCategoria>', methods=['GET'])
 def filtrar_produto_categoria(nomeCategoria):
@@ -577,7 +613,6 @@ def get_enderecos_cliente():
 
     comando = db_connection.cursor()
     db_connection.rollback()
-    print(idClienteLogado)
     comando.execute("SELECT * FROM loja.endereco WHERE idCliente = %s", (idClienteLogado,))
     results = comando.fetchall()
     comando.close()
@@ -729,10 +764,37 @@ def atualizar_endereco_cliente():
         return "-1"
 
 
-# esses dois de carrinho nao usei ainda
+# Rota para buscar os itens que estao no carrinho do cliente
+@app.route('/get_itens_carrinho_cliente', methods=['POST'])
+def get_itens_carrinho_cliente():
+    data = request.get_json()
+
+    idcarrinho = data['idCarrinho']
+
+    comando = db_connection.cursor()
+    db_connection.rollback()
+    comando.execute("SELECT * FROM loja.item WHERE idcarrinho = %s ORDER BY idItem DESC", (idcarrinho,))
+    results = comando.fetchall()
+    comando.close()
+
+    if results:
+        for item in results:
+            print(item)
+
+        response = make_response(jsonify(results))
+        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
+        return response
+
+    else:
+        print(json.dumps({'message': 'Carrinho vazio.'}))
+        response = make_response(json.dumps({'message': 'Lista de enderecos vazia.'}))
+        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
+        return response
+
+
 # Rota para adicionar itens no carrinho do cliente
-@app.route('/adicionar_produto_carrinho', methods=['POST'])
-def adicionar_produto_carrinho():
+@app.route('/adicionar_item_carrinho', methods=['POST'])
+def adicionar_item_carrinho():
     data = request.get_json()
 
     idProduto = data['idProduto']
@@ -741,34 +803,53 @@ def adicionar_produto_carrinho():
     comando = db_connection.cursor()
     db_connection.rollback()
 
-    # Verificar se o produto já está no carrinho do cliente
-    comando.execute(
-        "SELECT quantidade FROM loja.Item WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
-        (idProduto, idCliente))
-    registro = comando.fetchone()
-
-    if registro:
-        # Se o produto já está no carrinho, atualize a quantidade
-        nova_quantidade = registro[0] + 1
+    try:
+        # Verificar o estoque disponível do produto
         comando.execute(
-            "UPDATE loja.Item SET quantidade = %s WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
-            (nova_quantidade, idProduto, idCliente))
-    else:
-        # Caso contrário, adicione o produto ao carrinho com quantidade 1
+            "SELECT estoqueProduto FROM loja.Produto WHERE idProduto = %s",
+            (idProduto,))
+        estoque = comando.fetchone()
+
+        if not estoque:
+            raise ValueError("Produto não encontrado")
+
+        estoque_disponivel = estoque[0]
+
+        # Verificar se o produto já está no carrinho do cliente
         comando.execute(
-            "INSERT INTO loja.Item (idProduto, idCarrinho, quantidade) VALUES (%s, (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s), %s)",
-            (idProduto, idCliente, 1))
+            "SELECT quantidade FROM loja.Item WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
+            (idProduto, idCliente))
+        registro = comando.fetchone()
 
-    db_connection.commit()
-    comando.close()
+        if registro:
+            # Se o produto já está no carrinho, calcule a nova quantidade
+            nova_quantidade = registro[0] + 1
 
-    # Responder com uma mensagem JSON
-    message = {'message': 'O produto foi adicionado ao carrinho.'}
-    print(json.dumps(message))
-    return json.dumps(message)
+            if nova_quantidade > estoque_disponivel:
+                return "-1"
+
+            comando.execute(
+                "UPDATE loja.Item SET quantidade = %s WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
+                (nova_quantidade, idProduto, idCliente))
+        else:
+            # Caso contrário, adicione o produto ao carrinho com quantidade 1
+            if estoque_disponivel < 1:
+                return "-1"
+
+            comando.execute(
+                "INSERT INTO loja.Item (idProduto, idCarrinho, quantidade) VALUES (%s, (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s), %s)",
+                (idProduto, idCliente, 1))
+
+        db_connection.commit()
+        return "1"
+    except Exception as e:
+        db_connection.rollback()
+        print(f"Erro ao adicionar item ao carrinho: {e}")
+        return "0"
+    finally:
+        comando.close()
 
 
-# Rota para remover itens do carrinho do cliente
 @app.route('/remover_item_carrinho', methods=['POST'])
 def remover_item_carrinho():
     data = request.get_json()
@@ -779,26 +860,73 @@ def remover_item_carrinho():
     comando = db_connection.cursor()
     db_connection.rollback()
 
-    # Verificar se o produto está no carrinho do cliente
-    comando.execute(
-        "SELECT COUNT(*) FROM loja.Item WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
-        (idProduto, idCliente))
-    produto_existente = comando.fetchone()[0]
-
-    if produto_existente > 0:
-        # Remover o produto do carrinho
+    try:
+        # Verificar se o produto está no carrinho do cliente
         comando.execute(
-            "DELETE FROM loja.Item WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
+            "SELECT quantidade FROM loja.Item WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
             (idProduto, idCliente))
-        db_connection.commit()
-        comando.close()
-        message = {'message': 'O produto foi removido do carrinho.'}
-    else:
-        comando.close()
-        message = {'message': 'O produto nao esta no carrinho do cliente.'}
+        registro = comando.fetchone()
 
-    print(json.dumps(message))
-    return json.dumps(message)
+        if not registro:
+            return "-1"  # Produto não está no carrinho
+
+        quantidade_atual = registro[0]
+
+        if quantidade_atual == 1:
+            return "-1"  # Se a quantidade for 1, retorna -1
+
+        # Caso contrário, diminui a quantidade em 1
+        nova_quantidade = quantidade_atual - 1
+
+        comando.execute(
+            "UPDATE loja.Item SET quantidade = %s WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
+            (nova_quantidade, idProduto, idCliente))
+
+        db_connection.commit()
+        return "1"
+    except Exception as e:
+        db_connection.rollback()
+        print(f"Erro ao remover item do carrinho: {e}")
+        return "0"
+    finally:
+        comando.close()
+
+
+# Rota para remover itens do carrinho do cliente
+@app.route('/remover_produto_carrinho', methods=['POST'])
+def remover_produto_carrinho():
+    data = request.get_json()
+
+    idProduto = data['idProduto']
+    idCliente = data['idCliente']
+
+    comando = db_connection.cursor()
+    db_connection.rollback()
+
+    try:
+        # Verificar se o produto está no carrinho do cliente
+        comando.execute(
+            "SELECT COUNT(*) FROM loja.Item WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
+            (idProduto, idCliente))
+        produto_existente = comando.fetchone()[0]
+
+        if produto_existente > 0:
+            # Remover o produto do carrinho
+            comando.execute(
+                "DELETE FROM loja.Item WHERE idProduto = %s AND idCarrinho = (SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s)",
+                (idProduto, idCliente))
+            db_connection.commit()
+            comando.close()
+            return "1"
+        else:
+            comando.close()
+            return "-1"
+    except Exception as e:
+        db_connection.rollback()
+        print(f"Erro ao remover item do carrinho: {e}")
+        return "-1"
+    finally:
+        comando.close()
 
 
 if __name__ == '__main__':
