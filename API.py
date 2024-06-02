@@ -271,42 +271,6 @@ def busca_produto(nomeProduto):
         return response
 
 
-# Rota para obter um produto pelo id
-@app.route('/get_produto', methods=['POST'])
-def get_produto():
-    data = request.get_json()
-
-    comando = db_connection.cursor()
-    db_connection.rollback()
-    comando.execute("SELECT * FROM loja.produto WHERE idProduto = %s", (data['idProduto'],))
-    produto = comando.fetchone()
-    comando.close()
-
-    if produto:
-        print(produto)
-        produto_dict = {
-            'idProduto': produto[0],
-            'nomeProduto': produto[1],
-            'estoqueProduto': produto[2],
-            'descricao': produto[3],
-            'tamanhoProduto': produto[4],
-            'corPrincipal': produto[5],
-            'preco': produto[6],
-            'desconto': produto[7],
-            'imagemProduto': produto[8],
-            'emOferta': produto[9]
-        }
-        response = make_response(jsonify(produto_dict))
-        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
-        return response
-
-    else:
-        print(json.dumps({'message': 'Produto não encontrado.'}))
-        response = make_response(json.dumps({'message': 'Produto nao encontrado.'}))
-        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
-        return '-1'
-
-
 # filtrar produtos pelo nome da categoria
 @app.route('/filtrar_produto_categoria/<nomeCategoria>', methods=['GET'])
 def filtrar_produto_categoria(nomeCategoria):
@@ -764,6 +728,40 @@ def atualizar_endereco_cliente():
         return "-1"
 
 
+@app.route('/get_produtos_carrinho_cliente', methods=['POST'])
+def get_produtos_carrinho_cliente():
+    data = request.get_json()
+    idcarrinho = data['idCarrinho']
+
+    try:
+        comando = db_connection.cursor()
+        db_connection.rollback()
+
+        # Consulta SQL para obter os produtos vinculados aos itens do carrinho
+        comando.execute("""
+            SELECT p.*
+            FROM loja.item i
+            JOIN loja.produto p ON i.idproduto = p.idProduto
+            WHERE i.idcarrinho = %s
+            ORDER BY i.idItem DESC
+        """, (idcarrinho,))
+
+        produtos = comando.fetchall()
+        comando.close()
+
+        if produtos:
+            response = make_response(jsonify(produtos))
+            response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
+            return response
+        else:
+            print(json.dumps({'message': 'Carrinho vazio.'}))
+            return "-1"
+
+    except Exception as e:
+        print(f"Erro ao obter produtos do carrinho: {e}")
+        return jsonify({'message': 'Erro ao obter produtos do carrinho.'}), 500
+
+
 # Rota para buscar os itens que estao no carrinho do cliente
 @app.route('/get_itens_carrinho_cliente', methods=['POST'])
 def get_itens_carrinho_cliente():
@@ -787,9 +785,7 @@ def get_itens_carrinho_cliente():
 
     else:
         print(json.dumps({'message': 'Carrinho vazio.'}))
-        response = make_response(json.dumps({'message': 'Lista de enderecos vazia.'}))
-        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
-        return response
+        return "-1"
 
 
 # Rota para adicionar itens no carrinho do cliente
