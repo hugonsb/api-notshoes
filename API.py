@@ -591,9 +591,7 @@ def get_enderecos_cliente():
 
     else:
         print(json.dumps({'message': 'Lista de enderecos vazia.'}))
-        response = make_response(json.dumps({'message': 'Lista de enderecos vazia.'}))
-        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
-        return response
+        return "-1"
 
 
 # Rota para adicionar endereço para o cliente
@@ -923,6 +921,103 @@ def remover_produto_carrinho():
         return "-1"
     finally:
         comando.close()
+
+
+# Rota para cadastrar uma venda e atualizar estoque dos produtos
+@app.route('/cadastrar_venda_atualizar_estoque', methods=['POST'])
+def cadastrar_venda_atualizar_estoque():
+    try:
+        data = request.get_json()
+
+        # Extrair os dados da venda
+        dataPedido = data['dataPedido']
+        status = data['status']
+        detalhesPedido = data['detalhesPedido']
+        formaPagamento = data['formaPagamento']
+        idCarrinho = data['idCarrinho']
+        itensList = data['itensList']  # Lista de itens do carrinho
+
+        comando = db_connection.cursor()
+        db_connection.rollback()
+
+        # Inserir a venda na tabela Venda
+        comando.execute("""
+            INSERT INTO loja.Venda (dataPedido, status, detalhesPedido, formaPagamento, idCarrinho)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING idVenda;
+        """, (dataPedido, status, detalhesPedido, formaPagamento, idCarrinho))
+
+        # Limpar o carrinho do cliente
+        comando.execute("""
+            DELETE FROM loja.Item WHERE idCarrinho = %s;
+        """, str(idCarrinho))
+
+        # Atualizar os estoques dos produtos
+        for item in itensList:
+            idProduto = item['idProduto']
+            quantidadeComprada = item['quantidade']
+
+            # Obter o estoque atual do produto
+            comando.execute("""
+                SELECT estoqueProduto FROM loja.Produto WHERE idProduto = %s;
+            """, (idProduto,))
+            estoque_atual = comando.fetchone()[0]
+
+            # Subtrair a quantidade comprada do estoque atual
+            novo_estoque = max(0, estoque_atual - quantidadeComprada)
+
+            # Atualizar o estoque no banco de dados
+            comando.execute("""
+                UPDATE loja.Produto
+                SET estoqueProduto = %s
+                WHERE idProduto = %s;
+            """, (novo_estoque, idProduto))
+
+        db_connection.commit()
+        comando.close()
+        print(json.dumps({'message': 'Pedido realizado.'}))
+        return "1"
+
+    except Exception as e:
+        if db_connection:
+            db_connection.rollback()
+        print(f"Erro desconhecido: {e}")
+        return "-1"
+
+
+# Rota para buscar os endereços do cliente pelo id cliente
+@app.route('/get_pedidos_cliente', methods=['POST'])
+def get_pedidos_cliente():
+    data = request.get_json()
+
+    idClienteLogado = data['idClienteLogado']
+
+    comando = db_connection.cursor()
+    db_connection.rollback()
+
+
+    comando.execute("SELECT idCarrinho FROM loja.Cliente WHERE idCliente = %s", (idClienteLogado,))
+    idCarrinho = comando.fetchone()
+
+    if idCarrinho:
+        # Buscar todos os pedidos relacionados ao idCarrinho do cliente
+        comando.execute("SELECT * FROM loja.Venda WHERE idCarrinho = %s", (idCarrinho,))
+        results = comando.fetchall()
+        comando.close()
+
+        if results:
+            print(results)
+            response = make_response(jsonify(results))
+            response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
+            return response
+        else:
+            print(json.dumps({'message': 'Nenhum pedido encontrado.'}))
+            return "-1"
+
+    else:
+        comando.close()
+        print(json.dumps({'message': 'Erro desconhecido.'}))
+        return "-1"
 
 
 if __name__ == '__main__':
