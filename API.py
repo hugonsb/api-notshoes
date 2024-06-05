@@ -924,8 +924,8 @@ def remover_produto_carrinho():
 
 
 # Rota para cadastrar uma venda e atualizar estoque dos produtos
-@app.route('/cadastrar_venda_atualizar_estoque', methods=['POST'])
-def cadastrar_venda_atualizar_estoque():
+@app.route('/cadastrar_venda', methods=['POST'])
+def cadastrar_venda():
     try:
         data = request.get_json()
 
@@ -1018,6 +1018,57 @@ def get_pedidos_cliente():
         comando.close()
         print(json.dumps({'message': 'Erro desconhecido.'}))
         return "-1"
+
+
+@app.route('/get_produtos_filtro_intervalo', methods=['POST'])
+def get_produtos_filtro_intervalo():
+
+    data = request.get_json()
+    intervaloValor = data['intervaloValor']
+
+    # Definir os limites de preço com base no intervalo fornecido
+    if intervaloValor == 'ate R$199':
+        min_preco = 0
+        max_preco = 199
+    elif intervaloValor == 'de R$200 ate R$399':
+        min_preco = 200
+        max_preco = 399
+    elif intervaloValor == 'de R$400 ate R$599':
+        min_preco = 400
+        max_preco = 599
+    elif intervaloValor == 'acima de R$600':
+        min_preco = 600
+        max_preco = None
+    else:
+        return make_response(jsonify({'message': 'Intervalo de valor inválido.'}), 400)
+
+    comando = db_connection.cursor()
+    db_connection.rollback()
+
+    # Construir a consulta SQL com base nos limites de preço
+    if max_preco is not None:
+        query = 'SELECT * FROM loja.produto WHERE (preco - (preco * desconto)) BETWEEN %s AND %s'
+        params = (min_preco, max_preco)
+    else:
+        query = 'SELECT * FROM produto WHERE (preco - (preco * desconto)) >= %s'
+        params = (min_preco,)
+
+    comando.execute(query, params)
+    results = comando.fetchall()
+    comando.close()
+
+    if results:
+        for item in results:
+            print(item)
+
+        response = make_response(jsonify(results))
+        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
+        return response
+
+    else:
+        response = make_response(jsonify({'message': 'Nenhum produto encontrado.'}))
+        response.headers['Access-Control-Allow-Origin'] = '*'  # Permitir solicitações de qualquer origem
+        return response
 
 
 if __name__ == '__main__':
