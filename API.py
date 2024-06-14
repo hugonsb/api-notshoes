@@ -940,6 +940,20 @@ def cadastrar_venda():
         comando = db_connection.cursor()
         db_connection.rollback()
 
+        # Verificar se todos os itens têm estoque suficiente
+        for item in itensList:
+            idProduto = item['idProduto']
+            quantidadeComprada = item['quantidade']
+
+            # Obter o estoque atual do produto
+            comando.execute("""
+                SELECT estoqueProduto FROM loja.Produto WHERE idProduto = %s;
+            """, (idProduto,))
+            estoque_atual = comando.fetchone()[0]
+
+            if estoque_atual < quantidadeComprada:
+                return "-1"  # Retorna erro se algum item não tiver estoque suficiente
+
         # Inserir a venda na tabela Venda
         comando.execute("""
             INSERT INTO loja.Venda (dataPedido, status, detalhesPedido, formaPagamento, idCarrinho)
@@ -964,7 +978,7 @@ def cadastrar_venda():
             estoque_atual = comando.fetchone()[0]
 
             # Subtrair a quantidade comprada do estoque atual
-            novo_estoque = max(0, estoque_atual - quantidadeComprada)
+            novo_estoque = estoque_atual - quantidadeComprada
 
             # Atualizar o estoque no banco de dados
             comando.execute("""
@@ -983,6 +997,7 @@ def cadastrar_venda():
             db_connection.rollback()
         print(f"Erro desconhecido: {e}")
         return "-1"
+
 
 
 # Rota para buscar os endereços do cliente pelo id cliente
@@ -1050,7 +1065,7 @@ def get_produtos_filtro_intervalo():
         query = 'SELECT * FROM loja.produto WHERE (preco - (preco * desconto)) BETWEEN %s AND %s'
         params = (min_preco, max_preco)
     else:
-        query = 'SELECT * FROM produto WHERE (preco - (preco * desconto)) >= %s'
+        query = 'SELECT * FROM loja.produto WHERE (preco - (preco * desconto)) >= %s'
         params = (min_preco,)
 
     comando.execute(query, params)
